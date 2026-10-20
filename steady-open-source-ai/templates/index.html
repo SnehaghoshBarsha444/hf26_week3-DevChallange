@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="A local-first AI planner that turns goals into small, actionable steps using open-weight models.">
+  <title>Steady | Small steps, real progress</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#121a2d; --line:#283550; --text:#f3f6ff; --muted:#a7b2ca; --accent:#9ce6c2; --accent2:#b8c7ff; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(ellipse at top left,#1b3150 0,transparent 45%),var(--bg); color:var(--text); font:16px/1.6 Inter,ui-sans-serif,system-ui,-apple-system,sans-serif; }
+    main { width:min(900px,92%); margin:0 auto; padding:48px 0 64px; }
+    .eyebrow { color:var(--accent); text-transform:uppercase; letter-spacing:.16em; font-size:.76rem; font-weight:800; }
+    h1 { font-size:clamp(2.4rem,7vw,4.8rem); line-height:1.03; letter-spacing:-.055em; margin:14px 0; }
+    h1 span { color:var(--accent); }
+    .intro { max-width:650px; color:var(--muted); font-size:1.08rem; }
+    .pill { display:inline-flex; align-items:center; gap:8px; border:1px solid var(--line); background:#10192b; padding:7px 12px; border-radius:999px; color:#d6e2f6; font-size:.82rem; margin:12px 0 28px; }
+    .dot { width:8px;height:8px;border-radius:50%;background:var(--accent); }
+    .panel { background:rgba(18,26,45,.92); border:1px solid var(--line); border-radius:22px; padding:clamp(20px,4vw,32px); box-shadow:0 24px 80px #0003; }
+    label { display:block; font-weight:700; margin:0 0 8px; }
+    textarea { width:100%; border:1px solid #35435f; border-radius:12px; padding:14px; background:#0c1425; color:var(--text); font:inherit; resize:vertical; outline:none; }
+    textarea:focus { border-color:var(--accent); box-shadow:0 0 0 3px #9ce6c21c; }
+    #goal { min-height:100px; } #context { min-height:74px; }
+    .field { margin:18px 0; }
+    .hint { color:var(--muted); font-size:.85rem; margin-top:5px; }
+    button { border:0; border-radius:12px; padding:13px 19px; background:var(--accent); color:#10221a; font-weight:800; font-size:1rem; cursor:pointer; }
+    button:disabled { opacity:.6; cursor:wait; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:22px; }
+    .secondary { background:transparent; border:1px solid var(--line); color:var(--text); }
+    #status { color:var(--muted); font-size:.9rem; }
+    #result { display:none; margin-top:22px; white-space:pre-wrap; overflow-wrap:anywhere; }
+    #result h2 { margin-top:0; }
+    #plan { color:#e7edfa; }
+    .foot { color:var(--muted); font-size:.85rem; margin-top:24px; }
+    .error { color:#ffb5b5; }
+    @media(max-width:540px) { main{padding-top:30px} .actions button{width:100%} }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Open-source AI · Local-first</div>
+  <h1>Small steps.<br><span>Real progress.</span></h1>
+  <p class="intro">Steady turns an overwhelming goal into a practical plan you can actually start. Your prompt is sent to a model running on your own machine through Ollama, not to a hosted AI API.</p>
+  <div class="pill"><span class="dot"></span><span id="health">Checking local AI connection…</span></div>
+  <section class="panel">
+    <form id="planner">
+      <div class="field">
+        <label for="goal">What do you want to make progress on?</label>
+        <textarea id="goal" maxlength="500" required placeholder="Example: Build and launch a simple portfolio website in two weeks"></textarea>
+        <div class="hint">Be concrete. A goal, project, skill, or task is a good starting point.</div>
+      </div>
+      <div class="field">
+        <label for="context">Constraints or context (optional)</label>
+        <textarea id="context" maxlength="1000" placeholder="Example: I can spend 45 minutes each evening and have basic HTML/CSS knowledge."></textarea>
+      </div>
+      <div class="actions">
+        <button id="submit" type="submit">Build my plan ↗</button>
+        <button class="secondary" id="clear" type="button">Clear</button>
+        <span id="status" role="status" aria-live="polite"></span>
+      </div>
+    </form>
+  </section>
+  <section id="result" class="panel" aria-live="polite">
+    <h2>Your next steps</h2>
+    <div id="plan"></div>
+    <div class="actions"><button class="secondary" id="copy" type="button">Copy plan</button></div>
+  </section>
+  <p class="foot">Prototype note: Steady generates suggestions, not guarantees. Review the plan and adapt it to your circumstances. No account or cloud AI key is required.</p>
+</main>
+<script>
+const healthEl = document.getElementById('health');
+const statusEl = document.getElementById('status');
+const resultEl = document.getElementById('result');
+const planEl = document.getElementById('plan');
+const submitBtn = document.getElementById('submit');
+let currentPlan = '';
+
+fetch('/api/health').then(r => r.json()).then(async data => {
+  try {
+    const r = await fetch('http://localhost:11434/api/tags');
+    if (!r.ok) throw new Error();
+    const tags = await r.json();
+    const available = (tags.models || []).some(m => m.name === data.model || m.name.startsWith(data.model.split(':')[0] + ':'));
+    healthEl.textContent = available ? `Local model ready · ${data.model}` : `Ollama connected · pull ${data.model}`;
+  } catch {
+    healthEl.textContent = `Local Ollama required · ${data.model}`;
+  }
+}).catch(() => healthEl.textContent = 'Local AI connection status unavailable');
+
+document.getElementById('planner').addEventListener('submit', async event => {
+  event.preventDefault();
+  const goal = document.getElementById('goal').value.trim();
+  const context = document.getElementById('context').value.trim();
+  if (!goal) return;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Building your plan…';
+  statusEl.textContent = 'Running the model locally. This may take a moment.';
+  statusEl.className = '';
+  resultEl.style.display = 'none';
+  try {
+    const response = await fetch('/api/plan', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({goal, context})
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || 'Something went wrong.');
+    currentPlan = data.plan;
+    planEl.textContent = currentPlan;
+    resultEl.style.display = 'block';
+    statusEl.textContent = `Generated locally with ${data.model}.`;
+    resultEl.scrollIntoView({behavior:'smooth', block:'start'});
+  } catch (error) {
+    statusEl.textContent = error.message;
+    statusEl.className = 'error';
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Build my plan ↗';
+  }
+});
+document.getElementById('clear').addEventListener('click', () => {
+  document.getElementById('goal').value = '';
+  document.getElementById('context').value = '';
+  resultEl.style.display = 'none';
+  statusEl.textContent = '';
+  planEl.textContent = '';
+});
+document.getElementById('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(currentPlan);
+    statusEl.textContent = 'Plan copied to clipboard.';
+  } catch {
+    statusEl.textContent = 'Clipboard access was blocked by your browser.';
+  }
+});
+</script>
+</body>
+</html>
